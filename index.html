@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wild Egg Royale — M0 Netcode Spike</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e13; }
+      body { font: 13px/1.5 ui-monospace, "Cascadia Mono", Menlo, monospace; color: #d6dde8; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; }
+
+      #lobby {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: radial-gradient(ellipse at center, #141b26 0%, #080a0f 100%);
+        z-index: 10;
+      }
+      #lobby.hidden { display: none; }
+      .card { width: min(440px, 90vw); text-align: center; }
+      .egg { font-size: 56px; line-height: 1; animation: bob 2.4s ease-in-out infinite; }
+      @keyframes bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-10px) } }
+      h1 { font-size: 17px; letter-spacing: .16em; text-transform: uppercase; margin: 18px 0 4px; color: #f0d98c; }
+      .sub { color: #6b7787; font-size: 12px; margin-bottom: 26px; }
+      #mmState { font-size: 14px; color: #d6dde8; min-height: 22px; }
+      #mmDetail { font-size: 11px; color: #5d6a7a; min-height: 18px; margin-top: 4px; }
+      .bar { height: 2px; background: #1c2431; border-radius: 2px; overflow: hidden; margin-top: 22px; }
+      .bar i { display: block; height: 100%; width: 34%; background: #f0d98c;
+               animation: slide 1.25s ease-in-out infinite; }
+      @keyframes slide { 0% { margin-left: -34% } 100% { margin-left: 100% } }
+      .bar.done i { animation: none; width: 100%; background: #4c8c5a; }
+      .err { color: #d97070; }
+
+      #hud {
+        position: fixed; top: 10px; left: 10px; z-index: 5;
+        background: rgba(8,11,17,.82); border: 1px solid #1c2431; border-radius: 6px;
+        padding: 9px 12px; white-space: pre; font-size: 11.5px; line-height: 1.65;
+        pointer-events: none; color: #93a1b3;
+      }
+      #hud b { color: #f0d98c; font-weight: 600; }
+      #hud .ok { color: #6fbf7f; }
+      #hud .warn { color: #d9b070; }
+      #help {
+        position: fixed; bottom: 10px; left: 10px; z-index: 5;
+        color: #4a5563; font-size: 11px; pointer-events: none;
+      }
+
+      /* --- army panel --- */
+      #armyPanel {
+        position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+        z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 5px;
+      }
+      #armySlots { display: flex; gap: 5px; }
+      .slot {
+        width: 42px; height: 42px; border: 2px solid #2a3442; border-radius: 7px;
+        background: rgba(10,14,20,.86); display: grid; place-items: center;
+        position: relative; font-size: 19px; line-height: 1;
+      }
+      .slot .r { position: absolute; right: 1px; bottom: 0; font-size: 9px; opacity: .85; }
+      .slot.empty { color: #333d4b; font-size: 11px; border-style: dashed; }
+      #armyLabel { font-size: 10px; letter-spacing: .14em; color: #5d6a7a; text-transform: uppercase; }
+      #armyPanel.full #armyLabel { color: #f0d98c; }
+
+      /* --- replace modal --- */
+      #replaceModal {
+        position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+        background: rgba(6,9,13,.78); backdrop-filter: blur(3px);
+      }
+      #replaceModal[hidden] { display: none; }
+      .rm-card { width: min(760px, 94vw); }
+      .rm-head { text-align: center; margin-bottom: 14px; }
+      .rm-head h2 {
+        margin: 0 0 4px; font-size: 15px; letter-spacing: .16em;
+        text-transform: uppercase; color: #f0d98c;
+      }
+      .rm-head p { margin: 0; color: #7b8899; font-size: 12px; }
+      #offerTimer { color: #d97070; font-variant-numeric: tabular-nums; }
+      #incoming {
+        display: flex; align-items: center; gap: 14px; justify-content: center;
+        border: 2px solid #f0d98c; border-radius: 10px; padding: 12px 18px;
+        background: rgba(16,22,30,.92); margin-bottom: 6px;
+      }
+      #replaceWarning {
+        text-align: center; font-size: 11.5px; color: #d9b070; margin: 10px 0 12px;
+        min-height: 16px;
+      }
+      #replaceChoices {
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px;
+      }
+      .choice {
+        display: flex; align-items: center; gap: 8px; text-align: left;
+        border: 2px solid #2a3442; border-radius: 8px; padding: 8px;
+        background: rgba(12,17,24,.92); color: #d6dde8; cursor: pointer;
+        font: inherit; position: relative;
+      }
+      .choice:hover { background: rgba(30,42,58,.95); }
+      .choice.risky { border-style: dashed; }
+      .choice .key {
+        position: absolute; top: 3px; right: 5px; font-size: 9px; color: #5d6a7a;
+      }
+      .choice .lose {
+        position: absolute; bottom: 2px; left: 8px; font-size: 8.5px; color: #d97070;
+      }
+      .glyph { font-size: 22px; }
+      .glyph.big { font-size: 40px; }
+      .meta { display: flex; flex-direction: column; gap: 1px; font-size: 10px; }
+      .meta b { font-size: 11.5px; }
+      .meta i { font-style: normal; color: #7b8899; }
+      .meta i.ability { color: #9fc4e8; }
+      .rm-foot { text-align: center; margin-top: 14px; }
+      #declineBtn {
+        background: none; border: 1px solid #3a4553; color: #7b8899;
+        padding: 7px 18px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px;
+      }
+      #declineBtn:hover { border-color: #d97070; color: #d97070; }
+      #selectBox {
+        position: fixed; z-index: 7; pointer-events: none;
+        border: 1px solid #f0d98c; background: rgba(240,217,140,.12);
+      }
+      #selectBox[hidden] { display: none; }
+      #banner {
+        position: fixed; top: 15%; left: 50%; transform: translateX(-50%);
+        z-index: 15; pointer-events: none; text-align: center;
+      }
+      #banner[hidden] { display: none; }
+      .ann {
+        font-size: 20px; letter-spacing: .2em; text-transform: uppercase;
+        color: #f0d98c; text-shadow: 0 2px 18px rgba(0,0,0,.9);
+        animation: annIn .35s ease-out, annOut .5s ease-in 3.2s forwards;
+        margin-bottom: 6px; white-space: nowrap;
+      }
+      .ann.alarm { color: #e05555; font-size: 24px; }
+      .ann.good { color: #6fbf7f; }
+      @keyframes annIn { from { opacity: 0; transform: translateY(-12px) } to { opacity: 1 } }
+      @keyframes annOut { to { opacity: 0 } }
+
+      #phaseBar {
+        position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+        z-index: 6; background: rgba(8,11,17,.82); border: 1px solid #1c2431;
+        border-radius: 6px; padding: 5px 14px; font-size: 11.5px; color: #93a1b3;
+        display: flex; gap: 14px; align-items: center;
+      }
+      #phaseBar[hidden] { display: none; }
+      #phaseBar b { color: #f0d98c; font-variant-numeric: tabular-nums; }
+      .eggpips { letter-spacing: 2px; }
+      #bossBar {
+        position: fixed; top: 46px; left: 50%; transform: translateX(-50%);
+        z-index: 8; width: min(560px, 84vw); pointer-events: none;
+      }
+      #bossBar[hidden] { display: none; }
+      #bossLabel {
+        text-align: center; font-size: 11px; letter-spacing: .12em;
+        color: #f0d98c; margin-bottom: 3px; text-shadow: 0 1px 6px #000;
+      }
+      .bosstrack {
+        height: 11px; background: rgba(8,11,17,.9); border: 1px solid #3a2430;
+        border-radius: 6px; overflow: hidden;
+      }
+      #bossFill {
+        height: 100%; width: 100%; background: #b6483f; transition: width .12s linear;
+      }
+      #bossFill.friendly { background: #4c8c5a; }
+      #bossFill.enraged { background: #ff4422; box-shadow: 0 0 14px #ff4422; }
+
+      #summary {
+        position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+        background: rgba(6,9,13,.86); backdrop-filter: blur(4px); text-align: center;
+      }
+      #summary[hidden] { display: none; }
+      #summaryTitle { font-size: 34px; letter-spacing: .2em; color: #d97070; margin-bottom: 10px; }
+      #summary.won #summaryTitle { color: #f0d98c; }
+      #summaryBody { color: #93a1b3; font-size: 13px; line-height: 2; }
+      #summaryBody .stats { display: flex; gap: 20px; justify-content: center; margin-top: 12px; font-size: 11.5px; }
+      #summaryBody .stats b { color: #d6dde8; }
+      #summaryBody .hint { margin-top: 18px; font-size: 11px; color: #4a5563; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud" hidden></div>
+    <div id="help" hidden>WASD / arrows to move &nbsp;·&nbsp; SPACE to attack &nbsp;·&nbsp; drag-select &nbsp;·&nbsp; right-click to send &nbsp;·&nbsp; E to recall &nbsp;·&nbsp; right-drag to orbit &nbsp;·&nbsp; scroll to zoom &nbsp;·&nbsp; F3 debug</div>
+
+
+    <div id="phaseBar" hidden>
+      <span>⏱ <b id="clock">0:00</b></span>
+      <span id="phaseName">explore</span>
+      <span class="eggpips">you <b id="myEggs">🥚🥚🥚</b></span>
+      <span class="eggpips">them <b id="foeEggs">🥚🥚🥚</b></span>
+    </div>
+    <div id="bossBar" hidden>
+      <div id="bossLabel"></div>
+      <div class="bosstrack"><div id="bossFill"></div></div>
+    </div>
+    <div id="banner" hidden></div>
+
+    <div id="summary" hidden>
+      <div>
+        <div id="summaryTitle"></div>
+        <div id="summaryBody"></div>
+      </div>
+    </div>
+
+    <div id="selectBox" hidden></div>
+
+    <div id="armyPanel" hidden>
+      <div id="armySlots"></div>
+      <div id="armyLabel">Army</div>
+    </div>
+
+    <div id="replaceModal" hidden>
+      <div class="rm-card">
+        <div class="rm-head">
+          <h2>🥚 Hatched — army full</h2>
+          <p>Choose what it replaces &nbsp;·&nbsp; <span id="offerTimer">15.0</span>s left &nbsp;·&nbsp; press 1-0 or Esc</p>
+        </div>
+        <div id="incoming"></div>
+        <div id="replaceWarning"></div>
+        <div id="replaceChoices"></div>
+        <div class="rm-foot">
+          <button id="declineBtn">Discard it (Esc)</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="lobby">
+      <div class="card">
+        <div class="egg">🥚</div>
+        <h1>Wild Egg Royale</h1>
+        <div class="sub">M5 · the dragon</div>
+        <div id="mmState">Starting…</div>
+        <div id="mmDetail"></div>
+        <div class="bar" id="mmBar"><i></i></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
